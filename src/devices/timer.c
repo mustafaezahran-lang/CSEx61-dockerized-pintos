@@ -89,11 +89,20 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
+  if (ticks <= 0)
+    return;
+
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+  
+  enum intr_level old_level = intr_disable ();
+  
+  /* Update the waking time for the current thread and block it. */
+  thread_current ()->wakeup_tick = start + ticks;
+  thread_block ();
+  
+  intr_set_level (old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -165,13 +174,33 @@ timer_print_stats (void)
 {
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
-
-/* Timer interrupt handler. */
+
+/* Helper function to check and wake up sleeping threads.
+   Called via thread_foreach on every timer tick. */
+static void
+check_wakeup (struct thread *t, void *aux UNUSED)
+{
+  if (t->status == THREAD_BLOCKED && t->wakeup_tick > 0
+      && t->wakeup_tick <= timer_ticks ())
+    {
+      t->wakeup_tick = 0;
+      thread_unblock (t);
+    }
+}
+
+/* Timer interrupt handler.
+   Increments the tick counter, delegates all scheduling logic
+   to thread_tick(), and wakes up any threads whose sleep has expired.
+   MLFQS updates are handled inside thread_tick() to avoid double
+   execution. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+
+  /* Wake up sleeping threads whose wakeup_tick has been reached. */
+  thread_foreach (check_wakeup, NULL);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

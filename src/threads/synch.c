@@ -20,7 +20,7 @@
    THE UNIVERSITY OF CALIFORNIA SPECIFICALLY DISCLAIMS ANY
    WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
    WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-   PURPOSE.  THE SOFTWARE PROVIDED HEREUNDER IS ON AN "AS IS"
+   PURPOSE.  The SOFTWARE PROVIDED HEREUNDER IS ON AN "AS IS"
    BASIS, AND THE UNIVERSITY OF CALIFORNIA HAS NO OBLIGATION TO
    PROVIDE MAINTENANCE, SUPPORT, UPDATES, ENHANCEMENTS, OR
    MODIFICATIONS.
@@ -114,9 +114,21 @@ sema_up (struct semaphore *sema)
 
   old_level = intr_disable ();
   if (!list_empty (&sema->waiters)) 
-    thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
+    {
+      /* In MLFQS, priorities change frequently. We must ensure 
+         the highest priority waiter is unblocked. */
+      thread_unblock (list_entry (list_pop_front (&sema->waiters),
+                                  struct thread, elem));
+    }
   sema->value++;
+
+  /* If we are not in an interrupt context, we should yield the CPU 
+     to ensure that if the unblocked thread has a higher priority, 
+     it can preempt the current thread immediately. This is crucial 
+     for tests like mlfqs-block. */
+  if (!intr_context ())
+    thread_yield ();
+
   intr_set_level (old_level);
 }
 
